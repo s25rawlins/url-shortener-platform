@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  # Test databases
+  postgres-test:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: urlshortener_test
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpass
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d urlshortener_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis-test:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  kafka-test:
+    image: confluentinc/cp-kafka:latest
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper-test:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-test:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    ports:
+      - "9093:9092"
+    depends_on:
+      - zookeeper-test
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  zookeeper-test:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2182:2181"
+
+  # Test runner
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    environment:
+      # Database
+      DATABASE_URL: postgresql://testuser:testpass@postgres-test:5432/urlshortener_test
+      
+      # Redis
+      REDIS_URL: redis://redis-test:6379/0
+      
+      # Kafka
+      KAFKA_BOOTSTRAP_SERVERS: kafka-test:9092
+      
+      # Test environment
+      TESTING: "true"
+      PYTHONPATH: /app
+      
+    volumes:
+      - .:/app
+      - ./htmlcov:/app/htmlcov
+      - ./coverage.xml:/app/coverage.xml
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+      kafka-test:
+        condition: service_healthy
+    command: >
+      sh -c "
+        echo 'Waiting for services to be ready...' &&
+        sleep 10 &&
+        echo 'Running tests...' &&
+        nox -s tests coverage
+      "
+
+volumes:
+  test_postgres_data:
+  test_coverage_data:

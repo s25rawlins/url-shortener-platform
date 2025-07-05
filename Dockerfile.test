@@ -1,0 +1,41 @@
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements-dev.txt .
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
+# Install service dependencies
+COPY services/shared/requirements.txt services/shared/
+COPY services/gateway/requirements.txt services/gateway/
+COPY services/shortener/requirements.txt services/shortener/
+COPY services/redirector/requirements.txt services/redirector/
+COPY services/analytics/requirements.txt services/analytics/
+
+RUN pip install --no-cache-dir -r services/shared/requirements.txt
+RUN pip install --no-cache-dir -r services/gateway/requirements.txt
+RUN pip install --no-cache-dir -r services/shortener/requirements.txt
+RUN pip install --no-cache-dir -r services/redirector/requirements.txt
+RUN pip install --no-cache-dir -r services/analytics/requirements.txt
+
+# Copy source code
+COPY . .
+
+# Set Python path
+ENV PYTHONPATH=/app
+
+# Create directories for test outputs
+RUN mkdir -p /app/htmlcov /app/test-results
+
+# Default command
+CMD ["nox", "-s", "tests"]
